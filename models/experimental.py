@@ -190,8 +190,16 @@ class ONNX_ORT(nn.Module):
         selected_categories = category_id[X, Y, :].float()
         selected_scores = max_score[X, Y, :]
         X = X.unsqueeze(1).float()
-        return torch.cat([X, selected_boxes, selected_categories, selected_scores], 1)
-
+        # [Start Update ENd2End to include --non concat final]
+        # return torch.cat ([X, selected_boxes, selected_categories, selected_scores], 1)
+        if self.non_concat_final:
+            # the expected sequence is box, class, score, count, but empirically this return sequence give the expected ONNX sequence...
+            # the box need to unsqueeze to add batch dimension
+            # expected dimension for results: (1, #count, 4), (1, #count), (1, #count), (1,)
+            return selected_scores.reshape(1, -1), (selected_boxes/640).unsqueeze(-1).permute(2,0,1), selected_categories.reshape(1, -1), selected_indices.shape[0].unsqueeze(-1).float()
+        else:
+            return torch.cat([X, selected_boxes, selected_categories, selected_scores], 1)
+        # [End Update End2End to include --non concat final https://medium.com/geekculture/journey-putting-yolo-v7-model-into-tensorflow-lite-object-detection-api-model-running-on-android-e3f746a02fc4 ]
 class ONNX_TRT(nn.Module):
     '''onnx module with TensorRT NMS operation.'''
     def __init__(self, max_obj=100, iou_thres=0.45, score_thres=0.25, max_wh=None ,device=None, n_classes=80):
@@ -236,6 +244,10 @@ class End2End(nn.Module):
         self.end2end.eval()
 
     def forward(self, x):
+        # [Start Update End2End to include --nwhc]
+        if self.nwch:
+            x = x.permute(0,3,1,2) # NWCH (TFLITE expected input) => NCHW (expected by Yolo model)
+        # [End Update End2End to include --nwhc]
         x = self.model(x)
         x = self.end2end(x)
         return x
